@@ -43,3 +43,25 @@ static size_t base64_encode(const unsigned char *input, size_t input_len, char *
     }
     return o;
 }
+
+// Compute Sec-WebSocket-Accept = Base64(SHA1(key + GUID))
+static void compute_ws_accept(const char *client_key, char *accept_out /*must be >= 29*/) {
+    static const char *GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    unsigned char sha1[CC_SHA1_DIGEST_LENGTH];
+    char buf[128];
+
+    size_t n = snprintf(buf, sizeof(buf), "%s%s", client_key, GUID);
+    CC_SHA1((const unsigned char *)buf, (CC_LONG)n, sha1);
+
+    char b64[64];
+    size_t len = base64_encode(sha1, sizeof(sha1), b64);
+    b64[len] = '\0';
+    strncpy(accept_out, b64, 64);
+}
+
+// Nonblocking helper
+static int set_nonblock(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
