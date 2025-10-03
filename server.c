@@ -140,3 +140,84 @@ static int ws_send_text(int fd, const char *msg, size_t len) {
     if (write(fd, msg, len) < 0) return -1;
     return 0;
 }
+
+// Read one WebSocket frame (client -> server, masked). Returns -1 error/closed, 0 if not a full frame yet, 1 if OK
+static int ws_read_and_echo(int fd) {
+    unsigned char hdr[2];
+    ssize_t n = recv(fd, hdr, 2, MSG_PEEK);
+    if (n <= 0) return -1; // error or closed
+    if (n < 2) return 0; // not a full frame yet
+
+    unsigned fin = (hdr[0] & 0x80) != 0;
+    unsigned opcode = hdr[0] & 0x0F;
+    unsigned masked = (hdr[1] & 0x80) != 0;
+    unsigned plen = hdr[1] & 0x7F;
+    size_t header_len = 2;
+
+    if (plen == 126) header_len += 2;
+    else if (plen == 127) header_len += 8;
+
+    if (masked) header_len += 4;
+
+    // Check if full header is available
+    unsigned char header[14];
+    n = recv(fd, header, header_len, MSG_PEEK);
+    if (n < (ssize_t)header_len) return 0;
+
+    size_t off = 2;
+    if (plen == 126) {
+        plen = ((uint64_t)header[2] << 8) | header[3];
+        off += 2;
+    } else if (plen == 127) {
+        plen = 0;
+        for (int i = 0; i < 8; ++i) {
+            plen = (plen << 8) | header[2 + i];
+        }
+        off += 8;
+    }
+    unsigned char mask[4] = {0};
+    if (masked) {
+        mask[0] = header[off+0];
+        mask[1] = header[off+1];
+        mask[2] = header[off+2];
+        mask[3] = header[off+3];
+    }
+
+    size_t total = header_len + plen;
+    unsigned char *frame = (unsigned char *)malloc(total);
+    if (!frame) return -1;
+
+    // Read the entire frame
+    ssize_t got = recv(fd, frame, total, 0);
+    if (got < (ssize_t)total) { free(frame); return -1; }
+
+    // Payload starts after header_len
+    unsigned char *payload = frame + header_len;
+
+    if (masked) {
+        for (uint64_t i = 0; i < plen; ++i) {
+            payload[i] ^= mask[i % 4];
+        }
+    }
+    
+    if (opcode == 0x8) { // Close frame
+        free(frame);
+        return -1;
+    } else if (opcode == 0x1) { // Text frame
+        ws_send_text(fd, (const char*)payload, (size_t)plen);
+    } else if (opcode == 0x9) { // Ping frame
+       unsigned char hdr2[10];
+       size_t hlen = 0;
+       hdr2[0] = 0x80 | 0xA;
+       if (plen < 126) { hdr2[1] = (unsigned char)plen; hlen = 2; }
+       else if (plen <= 0xFFFF) { hdr2[1] = 126; hdr2[2] = (plen >> 8) & 0xFF; hdr2[3] = plen & 0xFF; hlen = 4; }
+       else { hdr2[1] = 127; for (int i = 0; i < 8; ++i) hdr2[2 + i] = (plen >> (8 * (7 - i))) & 0xFF; hlen = 10; }
+       write(fd, hdr2, hlen);
+       if (plen) write(fd, payload, plen);
+    }
+    
+    free(frame);
+    (void)fin;
+    return 1;
+    
+}
