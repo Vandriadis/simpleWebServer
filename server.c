@@ -97,3 +97,21 @@ static const char *NOT_FOUND =
 "HTTP/1.1 404 Not Found\r\n"
 "Connection: close\r\n"
 "Content-Length: 0\r\n\r\n";
+
+// Small HTTP header parser to get Sec-WebSocket-Key
+static int parse_http_request(char *req, char **method, char **path, char **ws_key) {
+    *method = strtok(req, " \t\r\n");
+    *path = strtok(NULL, " \t\r\n");
+    if (!*method || !*path) return -1;
+
+    *ws_key = NULL;
+    char *line = NULL;
+    while ((line = strtok(NULL, "\r\n"))) {
+        if (strncasecmp(line, "Sec-WebSocket-Key:", 18) == 0) {
+            char *p = line + 18;
+            while (*p == ' ' || *p == '\t') p++;
+            *ws_key = p;
+        }
+    }
+    return 0;
+}
