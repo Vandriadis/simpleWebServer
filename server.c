@@ -28,7 +28,7 @@ static size_t base64_encode(const unsigned char *input, size_t input_len, char *
         out[o++] = base64_table[v & 0x3F];
         i += 3;
     }
-    if (i + 1 < input_len) {
+    if (i + 1 == input_len) {
         unsigned v = (input[i] << 16);
         out[o++] = base64_table[(v >> 18) & 0x3F];
         out[o++] = base64_table[(v >> 12) & 0x3F];
@@ -145,23 +145,30 @@ static int ws_send_text(int fd, const char *msg, size_t len) {
 static int ws_read_and_echo(int fd) {
     unsigned char hdr[2];
     ssize_t n = recv(fd, hdr, 2, MSG_PEEK);
-    if (n <= 0) return -1; // error or closed
-    if (n < 2) return 0; // not a full frame yet
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; // no data yet
+        return -1;
+    }
+    if (n == 0) return -1;
+    if (n < 2)  return 0;
 
     unsigned fin = (hdr[0] & 0x80) != 0;
     unsigned opcode = hdr[0] & 0x0F;
     unsigned masked = (hdr[1] & 0x80) != 0;
-    unsigned plen = hdr[1] & 0x7F;
+    uint64_t plen = hdr[1] & 0x7F;
     size_t header_len = 2;
 
     if (plen == 126) header_len += 2;
     else if (plen == 127) header_len += 8;
-
     if (masked) header_len += 4;
 
-    // Check if full header is available
+    // ensure full header available
     unsigned char header[14];
     n = recv(fd, header, header_len, MSG_PEEK);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        return -1;
+    }
     if (n < (ssize_t)header_len) return 0;
 
     size_t off = 2;
@@ -170,11 +177,10 @@ static int ws_read_and_echo(int fd) {
         off += 2;
     } else if (plen == 127) {
         plen = 0;
-        for (int i = 0; i < 8; ++i) {
-            plen = (plen << 8) | header[2 + i];
-        }
+        for (int i = 0; i < 8; ++i) plen = (plen << 8) | header[2+i];
         off += 8;
     }
+
     unsigned char mask[4] = {0};
     if (masked) {
         mask[0] = header[off+0];
@@ -184,42 +190,52 @@ static int ws_read_and_echo(int fd) {
     }
 
     size_t total = header_len + plen;
-    unsigned char *frame = (unsigned char *)malloc(total);
+    unsigned char *frame = (unsigned char*)malloc(total);
     if (!frame) return -1;
 
-    // Read the entire frame
     ssize_t got = recv(fd, frame, total, 0);
-    if (got < (ssize_t)total) { free(frame); return -1; }
+    if (got < 0) {
+        free(frame);
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        return -1;
+    }
+    if (got == 0) { free(frame); return -1; }
+    if ((size_t)got < total) {
+        free(frame);
+        return 0;
+    }
 
-    // Payload starts after header_len
     unsigned char *payload = frame + header_len;
 
     if (masked) {
-        for (uint64_t i = 0; i < plen; ++i) {
-            payload[i] ^= mask[i % 4];
-        }
+        for (uint64_t i = 0; i < plen; ++i) payload[i] ^= mask[i % 4];
     }
-    
-    if (opcode == 0x8) { // Close frame
+
+    if (opcode == 0x8) { // close
         free(frame);
         return -1;
-    } else if (opcode == 0x1) { // Text frame
+    } else if (opcode == 0x1) { // text
+        // tiny log to stdout
+        fwrite("[ws recv] ", 1, 10, stdout);
+        fwrite(payload, 1, (size_t)plen, stdout);
+        fwrite("\n", 1, 1, stdout);
+        // Removed upgrade log here as per instructions
+
         ws_send_text(fd, (const char*)payload, (size_t)plen);
-    } else if (opcode == 0x9) { // Ping frame
-       unsigned char hdr2[10];
-       size_t hlen = 0;
-       hdr2[0] = 0x80 | 0xA;
-       if (plen < 126) { hdr2[1] = (unsigned char)plen; hlen = 2; }
-       else if (plen <= 0xFFFF) { hdr2[1] = 126; hdr2[2] = (plen >> 8) & 0xFF; hdr2[3] = plen & 0xFF; hlen = 4; }
-       else { hdr2[1] = 127; for (int i = 0; i < 8; ++i) hdr2[2 + i] = (plen >> (8 * (7 - i))) & 0xFF; hlen = 10; }
-       write(fd, hdr2, hlen);
-       if (plen) write(fd, payload, plen);
+    } else if (opcode == 0x9) {
+        unsigned char hdr2[10];
+        size_t hlen = 0;
+        hdr2[0] = 0x80 | 0xA;
+        if (plen < 126) { hdr2[1] = (unsigned char)plen; hlen = 2; }
+        else if (plen <= 0xFFFF) { hdr2[1]=126; hdr2[2]=(plen>>8)&0xFF; hdr2[3]=plen&0xFF; hlen=4; }
+        else { hdr2[1]=127; for (int i=0;i<8;i++) hdr2[2+i]=(plen>>(56-8*i))&0xFF; hlen=10; }
+        write(fd, hdr2, hlen);
+        if (plen) write(fd, payload, (size_t)plen);
     }
-    
+
     free(frame);
     (void)fin;
     return 1;
-    
 }
 
 static volatile sig_atomic_t g_stop = 0;
@@ -227,6 +243,7 @@ static void on_sigint(int _) { (void)_; g_stop = 1; }
 
 int main(void) {
     signal(SIGINT, on_sigint);
+    signal(SIGPIPE, SIG_IGN); // prevent SIGPIPE on write to closed socket
 
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) { perror("socket"); return 1; }
@@ -280,6 +297,10 @@ int main(void) {
             int cfd = accept(srv, NULL, NULL);
             if (cfd >= 0) {
                 set_nonblock(cfd);
+#ifdef SO_NOSIGPIPE
+                int one = 1;
+                setsockopt(cfd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
                 int placed = 0;
                 for (int i = 0; i < FD_SETSIZE; i++) if (conns[i].fd < 0) {
                     conns[i].fd = cfd; conns[i].type = CONN_HTTP; placed = 1; break;
@@ -332,6 +353,8 @@ int main(void) {
                 "Upgrade: websocket\r\n"
                 "Sec-WebSocket-Accept: %s\r\n\r\n", accept);
             send(fd, resp, (size_t)m, 0);
+            printf("[upgrade] client fd=%d -> WebSocket\n", fd);
+            fflush(stdout);
             conns[i].type = CONN_WS;
             continue;
            }
