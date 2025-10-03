@@ -115,3 +115,28 @@ static int parse_http_request(char *req, char **method, char **path, char **ws_k
     }
     return 0;
 }
+
+// Send WebSocket text frame (server -> client, unmasked)
+static int ws_send_text(int fd, const char *msg, size_t len) {
+    unsigned char hdr[10];
+    size_t hlen = 0;
+
+    hdr[0] = 0x80 | 0x1;
+    if (len < 126) {
+        hdr[1] = (unsigned char)len;
+        hlen = 2;
+    } else if (len <= 0xFFFF) {
+        hdr[1] = 126;
+        hdr[2] = (len >> 8) & 0xFF;
+        hdr[3] = len & 0xFF;
+        hlen = 4;
+    } else {
+        hdr[1] = 127;
+        for (int i = 0; i < 8; i++) hdr[2 + i] = (len >> (8 * (7 - i))) & 0xFF;
+        hlen = 10;
+    }
+
+    if (write(fd, hdr, hlen) < 0) return -1;
+    if (write(fd, msg, len) < 0) return -1;
+    return 0;
+}
