@@ -1,1 +1,12 @@
+# Compiled binaries
 server
+
+# Object files
+*.o
+
+# IDE and editor files
+.vscode
+.trunk
+
+# System files
+.DS_Store
