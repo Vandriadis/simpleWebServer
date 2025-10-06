@@ -15,19 +15,20 @@ A lightweight HTTP server written in C that supports both HTTP requests and WebS
 
 ```
 httpservc/
-├── include/           # Header files
-│   ├── http.h        # HTTP request/response handling
-│   ├── websocket.h   # WebSocket protocol implementation
-│   ├── base64.h      # Base64 encoding utilities
-│   └── util.h        # Utility functions
-├── src/              # Source files
-│   ├── main.c        # Main server loop and connection handling
-│   ├── http.c        # HTTP request parsing and responses
-│   ├── websocket.c   # WebSocket frame handling
-│   ├── base64.c      # Base64 encoding implementation
-│   └── util.c        # Utility functions
-├── Makefile          # Build configuration
-└── README.md         # This file
+├── include/              # Header files
+│   ├── http.h           # HTTP request/response handling
+│   ├── websocket.h      # WebSocket protocol implementation
+│   ├── base64.h         # Base64 encoding utilities
+│   └── util.h           # Utility functions
+├── src/                 # Source files
+│   ├── main.c           # Main server loop and connection handling
+│   ├── http.c           # HTTP request parsing and responses
+│   ├── websocket.c      # WebSocket frame handling
+│   ├── base64.c         # Base64 encoding implementation
+│   └── util.c           # Utility functions
+├── Makefile             # Build configuration
+├── compile_commands.json # Editor configuration for clangd/IDE support
+└── README.md            # This file
 ```
 
 ## Building
@@ -47,6 +48,13 @@ make clean
 - **Compiler**: Clang or GCC
 - **Platform**: macOS or Linux
 - **Libraries**: Standard C library, CommonCrypto (macOS) or OpenSSL (Linux)
+
+### Editor Support
+
+The project includes `compile_commands.json` for enhanced IDE support:
+- **clangd**: Automatic detection for IntelliSense and error checking
+- **VS Code**: C/C++ extension will use compile commands automatically
+- **Other IDEs**: Most modern C/C++ editors support compile_commands.json
 
 ## Usage
 
@@ -144,6 +152,7 @@ The server implements WebSocket text frames for bidirectional communication:
 2. **Compilation Errors**: Ensure you have the required development tools
 3. **WebSocket Connection Fails**: Check browser console for errors
 4. **Permission Denied**: Run with appropriate permissions for port binding
+5. **Editor Errors**: If you see "Unknown type name 'size_t'" or "cannot find file" errors in your editor, ensure your IDE is using the `compile_commands.json` file for proper include path resolution
 
 ### Debugging
 
