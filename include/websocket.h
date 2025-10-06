@@ -11,5 +11,7 @@ void compute_ws_accept(const char *client_key, char *accept_out);
 int ws_send_text(int fd, const char *msg, size_t len);
 int ws_read_and_echo(int fd);
 
+int ws_read_text(int fd, unsigned char **out, size_t *len_out);
+
 #endif // WEBSOCKET_H
 
