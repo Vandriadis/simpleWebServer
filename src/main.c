@@ -90,14 +90,14 @@ int main(void) {
 #endif
 	struct sockaddr_in addr; bzero(&addr, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(8080);
+	addr.sin_port = htons(8081);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	if (bind(srv, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); return 1; }
 	if (listen(srv, 16) < 0) { perror("listen"); return 1; }
 	set_nonblock(srv);
 
-	printf("Listening on http://127.0.0.1:8080  (Ctrl+C to stop)\n");
+	printf("Listening on http://127.0.0.1:8081  (Ctrl+C to stop)\n");
 
 	Conn conns[FD_SETSIZE];
 	for (int i = 0; i < FD_SETSIZE; i++) conns[i].fd = -1;
