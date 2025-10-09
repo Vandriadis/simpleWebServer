@@ -1,6 +1,76 @@
 console.log('Script starting...');
 let ws = null;
 let currentUser = null;
+let encryptionKey = null;
+
+// Crypto functions for end-to-end encryption
+async function deriveKey(password) {
+  const enc = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+  
+  // Use a fixed salt for the room (in production, this should be per-room)
+  const salt = enc.encode("websocket-chat-room-salt-v1");
+  
+  return window.crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptMessage(text, key) {
+  const enc = new TextEncoder();
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv },
+    key,
+    enc.encode(text)
+  );
+  
+  // Combine IV and encrypted data
+  const combined = new Uint8Array(iv.length + encrypted.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(encrypted), iv.length);
+  
+  // Convert to base64 for transmission
+  return btoa(String.fromCharCode.apply(null, combined));
+}
+
+async function decryptMessage(encryptedBase64, key) {
+  try {
+    // Decode from base64
+    const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+    
+    // Split IV and encrypted data
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      encrypted
+    );
+    
+    const dec = new TextDecoder();
+    return dec.decode(decrypted);
+  } catch (e) {
+    return "[🔒 Encrypted message - wrong key]";
+  }
+}
 
 function showLogin() {
   console.log('showLogin called');
@@ -133,9 +203,25 @@ async function loadMessageHistory() {
       if (messages.length === 0) {
         addToChat('[No message history]');
       } else {
-        messages.forEach(function(msg) {
-          addToChat('[' + msg.username + '] ' + msg.content);
-        });
+        for (const msg of messages) {
+          let content = msg.content;
+          
+          // Check if message looks encrypted (base64)
+          if (content.match(/^[A-Za-z0-9+/]+=*$/)) {
+            if (encryptionKey) {
+              // Try to decrypt
+              try {
+                content = await decryptMessage(content, encryptionKey);
+              } catch (e) {
+                content = '[🔒 Encrypted - wrong key?]';
+              }
+            } else {
+              content = '[🔒 Encrypted message - no key provided]';
+            }
+          }
+          
+          addToChat('[' + msg.username + '] ' + content);
+        }
       }
     }
   } catch (error) {
@@ -143,12 +229,61 @@ async function loadMessageHistory() {
   }
 }
 
+async function promptForEncryptionKey(showInChat) {
+  const password = prompt(
+    '🔒 SECURE CHAT ROOM PASSWORD\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+    'Create or enter a shared password for this chat room.\n\n' +
+    '✅ All users MUST use the SAME password\n' +
+    '✅ Example: "pizza2024" or "secretclub"\n' +
+    '✅ Messages are encrypted on your device\n' +
+    '✅ Server/database cannot read messages\n\n' +
+    '⚠️  Press Cancel or leave empty for NO encryption\n\n' +
+    'Enter password:'
+  );
+  
+  const statusEl = document.getElementById('encryption-status');
+  
+  if (password) {
+    encryptionKey = await deriveKey(password);
+    if (showInChat) {
+      addToChat('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      addToChat('[🔒 ENCRYPTION ENABLED]');
+      addToChat('[✓] Messages are end-to-end encrypted');
+      addToChat('[✓] Only users with correct password can read');
+      addToChat('[✓] Server cannot see message contents');
+      addToChat('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    }
+    if (statusEl) {
+      statusEl.textContent = '🔒 ENCRYPTED';
+      statusEl.style.color = '#00ff00';
+    }
+    // Reload message history with new key
+    await loadMessageHistory();
+  } else {
+    encryptionKey = null;
+    if (showInChat) {
+      addToChat('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      addToChat('[⚠️  ENCRYPTION DISABLED]');
+      addToChat('[!] Messages sent in PLAINTEXT');
+      addToChat('[!] Anyone can read messages');
+      addToChat('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    }
+    if (statusEl) {
+      statusEl.textContent = '⚠️  NOT ENCRYPTED';
+      statusEl.style.color = '#ff0000';
+    }
+    // Reload message history to show encrypted status
+    await loadMessageHistory();
+  }
+}
+
 function connectWebSocket() {
   console.log('Connecting to WebSocket...');
   if (ws) { ws.close(); }
   
-  // load history first before connecting
-  loadMessageHistory().then(function() {
+  // Ask for encryption password, then load history and connect
+  promptForEncryptionKey(true).then(function() {
     ws = new WebSocket('ws://' + location.host + '/ws');
     
     ws.onopen = function() {
@@ -156,9 +291,34 @@ function connectWebSocket() {
       addToChat('[Connected to chat]');
     };
     
-    ws.onmessage = function(event) {
+    ws.onmessage = async function(event) {
       console.log('WebSocket message received:', event.data);
-      addToChat(event.data);
+      // Messages from server come as "[username] content"
+      // If encryption is enabled, content will be encrypted
+      const match = event.data.match(/^\[([^\]]+)\] (.+)$/);
+      
+      if (match) {
+        const username = match[1];
+        const content = match[2];
+        
+        // Try to decrypt if we have a key
+        // Check if content looks like base64 (encrypted)
+        if (encryptionKey && content.match(/^[A-Za-z0-9+/]+=*$/)) {
+          try {
+            const decrypted = await decryptMessage(content, encryptionKey);
+            addToChat('[' + username + '] ' + decrypted);
+          } catch (e) {
+            // Decryption failed, show as encrypted
+            addToChat('[' + username + '] [🔒 Encrypted - wrong key?]');
+          }
+        } else {
+          // Either no key or plaintext message
+          addToChat('[' + username + '] ' + content);
+        }
+      } else {
+        // System message or other format
+        addToChat(event.data);
+      }
     };
     
     ws.onclose = function() {
@@ -179,11 +339,18 @@ function addToChat(message) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function sendMessage() {
+async function sendMessage() {
   const input = document.getElementById('msg-input');
   const message = input.value.trim();
   if (message && ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(message);
+    let toSend = message;
+    
+    // Encrypt if we have a key
+    if (encryptionKey) {
+      toSend = await encryptMessage(message, encryptionKey);
+    }
+    
+    ws.send(toSend);
     input.value = '';
   }
 }
@@ -255,6 +422,16 @@ document.addEventListener('DOMContentLoaded', function() {
       e.preventDefault();
       console.log('Send button clicked');
       sendMessage();
+    });
+  }
+  
+  const changeKeyBtn = document.getElementById('change-key-btn');
+  if (changeKeyBtn) {
+    console.log('Change key button found');
+    changeKeyBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      console.log('Change key button clicked');
+      promptForEncryptionKey(true);
     });
   }
 });

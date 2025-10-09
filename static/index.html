@@ -2,12 +2,13 @@
 <html>
 <head>
 <meta charset='utf-8'>
-<title>WebSocket Chat</title>
+<title>💬 WebSocket Chat - Netscape Navigator Compatible!</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>">
 </head>
 <body>
 <div class='container'>
-<div class='header'><h1>WebSocket Chat</h1></div>
+<div class='header'><h1>💬 WebSocket Chat 💬</h1></div>
 <div class='content'>
 <div id='auth-section' class='auth-section'>
 <div id='login-form'>
@@ -43,6 +44,8 @@
 </div>
 <div id='user-info' class='user-info hidden'>
 <span id='username-display'></span>
+<span id='encryption-status' style='margin-left:15px;font-weight:bold;'></span>
+<button class='btn' id='change-key-btn' style='float:right;margin-right:10px;'>🔑 Set Password</button>
 <button class='btn btn-danger' id='logout-btn' style='float:right;'>Logout</button>
 </div>
 <div id='chat-section' class='chat-section hidden'>
