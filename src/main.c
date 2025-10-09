@@ -69,6 +69,15 @@ static void set_cookie_and_no_content(int fd, const char *name, const char *valu
 	send(fd, hdr, (size_t)n, 0);
 }
 
+// count active websocket connections
+static int count_online_ws(Conn *conns) {
+	int count = 0;
+	for (int i = 0; i < FD_SETSIZE; i++) {
+		if (conns[i].fd >= 0 && conns[i].type == CONN_WS) count++;
+	}
+	return count;
+}
+
 // helper for building JSON message array
 struct msg_builder {
 	char *buf;
@@ -306,6 +315,17 @@ int main(void) {
 				} else {
 					send(fd, UNAUTHORIZED, strlen(UNAUTHORIZED), 0);
 				}
+				close(fd); conns[i].fd = -1; continue;
+			}
+
+			/* GET /stats -> get server statistics */
+			if (strcasecmp(method, "GET") == 0 && strcmp(path, "/stats") == 0) {
+				int total_users = db_get_user_count();
+				int online_users = count_online_ws(conns);
+				char body[128];
+				snprintf(body, sizeof(body), "{\"total_users\":%d,\"online_users\":%d}", 
+					total_users >= 0 ? total_users : 0, online_users);
+				send_json(fd, "200 OK", body);
 				close(fd); conns[i].fd = -1; continue;
 			}
 

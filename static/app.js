@@ -3,6 +3,24 @@ let ws = null;
 let currentUser = null;
 let encryptionKey = null;
 
+// update stats badges
+async function updateStats() {
+  try {
+    const response = await fetch('/stats');
+    if (response.ok) {
+      const stats = await response.json();
+      document.getElementById('users-count').textContent = stats.total_users;
+      document.getElementById('online-count').textContent = stats.online_users;
+    }
+  } catch (error) {
+    console.error('Failed to fetch stats:', error);
+  }
+}
+
+// update stats every 3 seconds
+setInterval(updateStats, 3000);
+updateStats(); // initial call
+
 // Crypto functions for end-to-end encryption
 async function deriveKey(password) {
   const enc = new TextEncoder();
@@ -343,6 +361,12 @@ async function sendMessage() {
   const input = document.getElementById('msg-input');
   const message = input.value.trim();
   if (message && ws && ws.readyState === WebSocket.OPEN) {
+    // Add sending animation
+    input.classList.add('sending');
+    setTimeout(function() {
+      input.classList.remove('sending');
+    }, 500);
+    
     let toSend = message;
     
     // Encrypt if we have a key

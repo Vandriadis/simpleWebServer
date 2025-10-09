@@ -16,4 +16,7 @@ int db_get_username_by_id(int user_id, char *out, size_t out_sz);
 int db_save_message(int user_id, const char *username, const char *content);
 int db_get_messages(int limit, void (*callback)(const char*, const char*, long, void*), void *userdata);
 
+// stats
+int db_get_user_count(void);
+
 #endif

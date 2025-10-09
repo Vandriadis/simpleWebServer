@@ -151,6 +151,18 @@ int db_get_username_by_id(int user_id, char *out, size_t out_sz) {
     return 0;
 }
 
+// get total number of registered users
+int db_get_user_count(void) {
+    static const char *sql = "SELECT COUNT(*) FROM users;";
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    int rc = sqlite3_step(st);
+    if (rc != SQLITE_ROW) { sqlite3_finalize(st); return -1; }
+    int count = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    return count;
+}
+
 // save a chat message to the database
 int db_save_message(int user_id, const char *username, const char *content) {
     static const char *sql = "INSERT INTO messages (user_id, username, content, created_at) VALUES (?, ?, ?, ?);";
