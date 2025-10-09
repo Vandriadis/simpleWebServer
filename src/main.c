@@ -10,6 +10,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -66,6 +67,88 @@ static void set_cookie_and_no_content(int fd, const char *name, const char *valu
 		"Connection: close\r\n"
 		"Content-Length: 0\r\n\r\n", name, value, max_age);
 	send(fd, hdr, (size_t)n, 0);
+}
+
+// helper for building JSON message array
+struct msg_builder {
+	char *buf;
+	int offset;
+	int first;
+};
+
+static void append_message_json(const char *username, const char *content, long ts, void *userdata) {
+	struct msg_builder *mb = (struct msg_builder*)userdata;
+	if (!mb->first) mb->offset += sprintf(mb->buf + mb->offset, ",");
+	mb->first = 0;
+	
+	// basic JSON escaping for quotes and backslashes
+	char esc[4096] = {0};
+	const char *p = content;
+	char *out = esc;
+	while (*p && (out - esc) < 4000) {
+		if (*p == '"' || *p == '\\') *out++ = '\\';
+		*out++ = *p++;
+	}
+	*out = '\0';
+	
+	mb->offset += sprintf(mb->buf + mb->offset,
+		"{\"username\":\"%s\",\"content\":\"%s\",\"timestamp\":%ld}",
+		username, esc, ts);
+}
+
+// get MIME type based on file extension
+static const char* get_mime_type(const char *path) {
+	const char *ext = strrchr(path, '.');
+	if (!ext) return "application/octet-stream";
+	if (strcmp(ext, ".html") == 0) return "text/html; charset=utf-8";
+	if (strcmp(ext, ".css") == 0) return "text/css; charset=utf-8";
+	if (strcmp(ext, ".js") == 0) return "application/javascript; charset=utf-8";
+	if (strcmp(ext, ".json") == 0) return "application/json; charset=utf-8";
+	if (strcmp(ext, ".png") == 0) return "image/png";
+	if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) return "image/jpeg";
+	if (strcmp(ext, ".gif") == 0) return "image/gif";
+	if (strcmp(ext, ".svg") == 0) return "image/svg+xml";
+	if (strcmp(ext, ".ico") == 0) return "image/x-icon";
+	return "application/octet-stream";
+}
+
+// serve a static file
+static void serve_file(int fd, const char *filepath) {
+	FILE *f = fopen(filepath, "rb");
+	if (!f) {
+		send(fd, NOT_FOUND, strlen(NOT_FOUND), 0);
+		return;
+	}
+	
+	// get file size
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	
+	if (fsize < 0 || fsize > 10*1024*1024) {  // max 10MB
+		fclose(f);
+		send(fd, BAD_REQUEST, strlen(BAD_REQUEST), 0);
+		return;
+	}
+	
+	// send headers
+	const char *mime = get_mime_type(filepath);
+	char hdr[512];
+	int n = snprintf(hdr, sizeof(hdr),
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Type: %s\r\n"
+		"Content-Length: %ld\r\n"
+		"Connection: close\r\n"
+		"\r\n", mime, fsize);
+	send(fd, hdr, (size_t)n, 0);
+	
+	// send file content
+	char buf[8192];
+	size_t r;
+	while ((r = fread(buf, 1, sizeof(buf), f)) > 0) {
+		send(fd, buf, r, 0);
+	}
+	fclose(f);
 }
 
 int main(void) {
@@ -145,9 +228,13 @@ int main(void) {
 				int r = ws_read_text(fd, &msg, &mlen);
 				if (r < 0) { close(fd); conns[i].fd = -1; continue; }
 				if (r == 1) {
-					/* broadcast to all WS conns with username prefix */
+					// save message to db
+					const char *username = conns[i].username[0] ? conns[i].username : "anon";
+					db_save_message(conns[i].user_id, username, (const char*)msg);
+					
+					// broadcast to all WS conns with username prefix
 					char prefix[64];
-					int pn = snprintf(prefix, sizeof(prefix), "[%s] ", conns[i].username[0] ? conns[i].username : "anon");
+					int pn = snprintf(prefix, sizeof(prefix), "[%s] ", username);
 					for (int k = 0; k < FD_SETSIZE; k++) if (conns[k].fd >= 0 && conns[k].type == CONN_WS) {
 						ws_send_text(conns[k].fd, prefix, (size_t)pn);
 						ws_send_text(conns[k].fd, (const char*)msg, mlen);
@@ -179,8 +266,21 @@ int main(void) {
 				close(fd); conns[i].fd = -1; continue;
 			}
 
-			if (strcasecmp(method, "GET") == 0 && strcasecmp(path, "/") == 0) {
-				send(fd, INDEX_HTML, strlen(INDEX_HTML), 0);
+			// serve index.html for root
+			if (strcasecmp(method, "GET") == 0 && strcmp(path, "/") == 0) {
+				serve_file(fd, "static/index.html");
+				close(fd); conns[i].fd = -1; continue;
+			}
+			
+			// serve static files
+			if (strcasecmp(method, "GET") == 0 && strncmp(path, "/static/", 8) == 0) {
+				// security: prevent directory traversal
+				if (strstr(path, "..")) {
+					send(fd, BAD_REQUEST, strlen(BAD_REQUEST), 0);
+					close(fd); conns[i].fd = -1; continue;
+				}
+				// remove leading slash: /static/app.js -> static/app.js
+				serve_file(fd, path + 1);
 				close(fd); conns[i].fd = -1; continue;
 			}
 
@@ -206,6 +306,39 @@ int main(void) {
 				} else {
 					send(fd, UNAUTHORIZED, strlen(UNAUTHORIZED), 0);
 				}
+				close(fd); conns[i].fd = -1; continue;
+			}
+
+			/* GET /messages -> get chat history (auth required) */
+			if (strcasecmp(method, "GET") == 0 && strcmp(path, "/messages") == 0) {
+				char sid[256] = {0};
+				get_cookie_value(buf, "sid", sid, sizeof(sid));
+				int uid = 0;
+				if (sid[0] == 0 || db_get_session_user(sid, &uid) != 1) {
+					send(fd, UNAUTHORIZED, strlen(UNAUTHORIZED), 0);
+					close(fd); conns[i].fd = -1; continue;
+				}
+				// build JSON array of messages
+				char *resp = malloc(65536); // plenty of space
+				if (!resp) {
+					send(fd, BAD_REQUEST, strlen(BAD_REQUEST), 0);
+					close(fd); conns[i].fd = -1; continue;
+				}
+				
+				struct msg_builder mb = { resp, 0, 1 };
+				mb.offset = sprintf(resp, "[");
+				db_get_messages(100, append_message_json, &mb);
+				mb.offset += sprintf(resp + mb.offset, "]");
+				
+				char hdr[256];
+				int n = snprintf(hdr, sizeof(hdr),
+					"HTTP/1.1 200 OK\r\n"
+					"Content-Type: application/json; charset=utf-8\r\n"
+					"Content-Length: %d\r\n"
+					"Connection: close\r\n\r\n", mb.offset);
+				send(fd, hdr, (size_t)n, 0);
+				send(fd, resp, (size_t)mb.offset, 0);
+				free(resp);
 				close(fd); conns[i].fd = -1; continue;
 			}
 

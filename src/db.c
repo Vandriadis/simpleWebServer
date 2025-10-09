@@ -40,8 +40,23 @@ int db_init(const char *db_path) {
 		"ip TEXT,"
 		"FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE"
 		");";
+	// messages table - stores chat history
+	const char *schema_messages =
+		"CREATE TABLE IF NOT EXISTS messages ("
+		"id INTEGER PRIMARY KEY AUTOINCREMENT,"
+		"user_id INTEGER NOT NULL,"
+		"username TEXT NOT NULL,"  // denormalized for faster reads
+		"content TEXT NOT NULL,"
+		"created_at INTEGER NOT NULL,"
+		"FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE"
+		");";
+	// index on timestamp so we can quickly grab recent messages
+	const char *idx_messages = "CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);";
+	
 	if (db_exec(schema_users) < 0) return -1;
 	if (db_exec(schema_sessions) < 0) return -1;
+	if (db_exec(schema_messages) < 0) return -1;
+	if (db_exec(idx_messages) < 0) return -1;
 	return 0;
 }
 
@@ -134,5 +149,43 @@ int db_get_username_by_id(int user_id, char *out, size_t out_sz) {
     snprintf(out, out_sz, "%s", (const char*)u);
     sqlite3_finalize(st);
     return 0;
+}
+
+// save a chat message to the database
+int db_save_message(int user_id, const char *username, const char *content) {
+    static const char *sql = "INSERT INTO messages (user_id, username, content, created_at) VALUES (?, ?, ?, ?);";
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, user_id);
+    sqlite3_bind_text(st, 2, username, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, content, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, (sqlite3_int64)time(NULL));
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+// fetch recent messages (newest first)
+// callback is called for each message: callback(username, content, timestamp, userdata)
+int db_get_messages(int limit, void (*callback)(const char*, const char*, long, void*), void *userdata) {
+    static const char *sql = "SELECT username, content, created_at FROM messages ORDER BY created_at DESC LIMIT ?;";
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(g_db, sql, -1, &st, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_int(st, 1, limit);
+    
+    int count = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *username = sqlite3_column_text(st, 0);
+        const unsigned char *content = sqlite3_column_text(st, 1);
+        long timestamp = (long)sqlite3_column_int64(st, 2);
+        
+        if (username && content && callback) {
+            callback((const char*)username, (const char*)content, timestamp, userdata);
+            count++;
+        }
+    }
+    
+    sqlite3_finalize(st);
+    return count;
 }
     

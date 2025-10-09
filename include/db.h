@@ -11,4 +11,9 @@ int db_create_session(const char *sid, int user_id, long expires_at);
 int db_get_session_user(const char *sid, int *user_id);
 int db_delete_session(const char *sid);
 int db_get_username_by_id(int user_id, char *out, size_t out_sz);
+
+// message history
+int db_save_message(int user_id, const char *username, const char *content);
+int db_get_messages(int limit, void (*callback)(const char*, const char*, long, void*), void *userdata);
+
 #endif
