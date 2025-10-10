@@ -31,10 +31,10 @@ async function deriveKey(password) {
     false,
     ["deriveBits", "deriveKey"]
   );
-  
+
   // Use a fixed salt for the room (in production, this should be per-room)
   const salt = enc.encode("websocket-chat-room-salt-v1");
-  
+
   return window.crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
@@ -52,18 +52,18 @@ async function deriveKey(password) {
 async function encryptMessage(text, key) {
   const enc = new TextEncoder();
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  
+
   const encrypted = await window.crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv },
     key,
     enc.encode(text)
   );
-  
+
   // Combine IV and encrypted data
   const combined = new Uint8Array(iv.length + encrypted.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(encrypted), iv.length);
-  
+
   // Convert to base64 for transmission
   return btoa(String.fromCharCode.apply(null, combined));
 }
@@ -72,17 +72,17 @@ async function decryptMessage(encryptedBase64, key) {
   try {
     // Decode from base64
     const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
-    
+
     // Split IV and encrypted data
     const iv = combined.slice(0, 12);
     const encrypted = combined.slice(12);
-    
+
     const decrypted = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv },
       key,
       encrypted
     );
-    
+
     const dec = new TextDecoder();
     return dec.decode(decrypted);
   } catch (e) {
@@ -118,15 +118,15 @@ function setupFormHandlers() {
   console.log('Setting up form handlers...');
   const loginForm = document.getElementById('loginForm');
   const registerForm = document.getElementById('registerForm');
-  
+
   if (loginForm) {
     console.log('Login form found');
-    loginForm.addEventListener('submit', async function(e) {
+    loginForm.addEventListener('submit', async function (e) {
       console.log('Login form submitted');
       e.preventDefault();
       const formData = new FormData(this);
       const data = new URLSearchParams(formData);
-      
+
       try {
         const response = await fetch('/login', {
           method: 'POST',
@@ -134,12 +134,12 @@ function setupFormHandlers() {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: data
         });
-        
+
         console.log('Login response status:', response.status);
         if (response.ok) {
           showMessage('Login successful!', 'success');
           console.log('Login successful, checking auth status...');
-          setTimeout(function() {
+          setTimeout(function () {
             console.log('Calling checkAuthStatus...');
             checkAuthStatus();
           }, 500);
@@ -151,21 +151,21 @@ function setupFormHandlers() {
       }
     });
   }
-  
+
   if (registerForm) {
     console.log('Register form found');
-    registerForm.addEventListener('submit', async function(e) {
+    registerForm.addEventListener('submit', async function (e) {
       e.preventDefault();
       const formData = new FormData(this);
       const data = new URLSearchParams(formData);
-      
+
       try {
         const response = await fetch('/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: data
         });
-        
+
         if (response.ok) {
           showMessage('Registration successful! You can now login.', 'success');
           setTimeout(showLogin, 1000);
@@ -223,7 +223,7 @@ async function loadMessageHistory() {
       } else {
         for (const msg of messages) {
           let content = msg.content;
-          
+
           // Check if message looks encrypted (base64)
           if (content.match(/^[A-Za-z0-9+/]+=*$/)) {
             if (encryptionKey) {
@@ -237,7 +237,7 @@ async function loadMessageHistory() {
               content = '[🔒 Encrypted message - no key provided]';
             }
           }
-          
+
           addToChat('[' + msg.username + '] ' + content);
         }
       }
@@ -259,9 +259,9 @@ async function promptForEncryptionKey(showInChat) {
     '⚠️  Press Cancel or leave empty for NO encryption\n\n' +
     'Enter password:'
   );
-  
+
   const statusEl = document.getElementById('encryption-status');
-  
+
   if (password) {
     encryptionKey = await deriveKey(password);
     if (showInChat) {
@@ -299,26 +299,26 @@ async function promptForEncryptionKey(showInChat) {
 function connectWebSocket() {
   console.log('Connecting to WebSocket...');
   if (ws) { ws.close(); }
-  
+
   // Ask for encryption password, then load history and connect
-  promptForEncryptionKey(true).then(function() {
+  promptForEncryptionKey(true).then(function () {
     ws = new WebSocket('ws://' + location.host + '/ws');
-    
-    ws.onopen = function() {
+
+    ws.onopen = function () {
       console.log('WebSocket connected');
       addToChat('[Connected to chat]');
     };
-    
-    ws.onmessage = async function(event) {
+
+    ws.onmessage = async function (event) {
       console.log('WebSocket message received:', event.data);
       // Messages from server come as "[username] content"
       // If encryption is enabled, content will be encrypted
       const match = event.data.match(/^\[([^\]]+)\] (.+)$/);
-      
+
       if (match) {
         const username = match[1];
         const content = match[2];
-        
+
         // Try to decrypt if we have a key
         // Check if content looks like base64 (encrypted)
         if (encryptionKey && content.match(/^[A-Za-z0-9+/]+=*$/)) {
@@ -338,13 +338,13 @@ function connectWebSocket() {
         addToChat(event.data);
       }
     };
-    
-    ws.onclose = function() {
+
+    ws.onclose = function () {
       console.log('WebSocket disconnected');
       addToChat('[Disconnected from chat]');
     };
-    
-    ws.onerror = function(error) {
+
+    ws.onerror = function (error) {
       console.log('WebSocket error:', error);
       addToChat('[WebSocket error]');
     };
@@ -363,17 +363,17 @@ async function sendMessage() {
   if (message && ws && ws.readyState === WebSocket.OPEN) {
     // Add sending animation
     input.classList.add('sending');
-    setTimeout(function() {
+    setTimeout(function () {
       input.classList.remove('sending');
     }, 500);
-    
+
     let toSend = message;
-    
+
     // Encrypt if we have a key
     if (encryptionKey) {
       toSend = await encryptMessage(message, encryptionKey);
     }
-    
+
     ws.send(toSend);
     input.value = '';
   }
@@ -391,24 +391,24 @@ async function logout() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   console.log('DOM loaded, setting up handlers');
   setupFormHandlers();
   checkAuthStatus();
-  
+
   const msgInput = document.getElementById('msg-input');
   if (msgInput) {
-    msgInput.addEventListener('keypress', function(e) {
+    msgInput.addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         sendMessage();
       }
     });
   }
-  
+
   const needAccountBtn = document.getElementById('need-account-btn');
   if (needAccountBtn) {
     console.log('Need account button found');
-    needAccountBtn.addEventListener('click', function(e) {
+    needAccountBtn.addEventListener('click', function (e) {
       e.preventDefault();
       console.log('Need account button clicked');
       showRegister();
@@ -416,11 +416,11 @@ document.addEventListener('DOMContentLoaded', function() {
   } else {
     console.log('Need account button NOT found');
   }
-  
+
   const haveAccountBtn = document.getElementById('have-account-btn');
   if (haveAccountBtn) {
     console.log('Have account button found');
-    haveAccountBtn.addEventListener('click', function(e) {
+    haveAccountBtn.addEventListener('click', function (e) {
       e.preventDefault();
       console.log('Have account button clicked');
       showLogin();
@@ -428,31 +428,31 @@ document.addEventListener('DOMContentLoaded', function() {
   } else {
     console.log('Have account button NOT found');
   }
-  
+
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     console.log('Logout button found');
-    logoutBtn.addEventListener('click', function(e) {
+    logoutBtn.addEventListener('click', function (e) {
       e.preventDefault();
       console.log('Logout button clicked');
       logout();
     });
   }
-  
+
   const sendBtn = document.getElementById('send-btn');
   if (sendBtn) {
     console.log('Send button found');
-    sendBtn.addEventListener('click', function(e) {
+    sendBtn.addEventListener('click', function (e) {
       e.preventDefault();
       console.log('Send button clicked');
       sendMessage();
     });
   }
-  
+
   const changeKeyBtn = document.getElementById('change-key-btn');
   if (changeKeyBtn) {
     console.log('Change key button found');
-    changeKeyBtn.addEventListener('click', function(e) {
+    changeKeyBtn.addEventListener('click', function (e) {
       e.preventDefault();
       console.log('Change key button clicked');
       promptForEncryptionKey(true);

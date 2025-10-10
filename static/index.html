@@ -1,69 +1,75 @@
 <!doctype html>
 <html>
-<head>
-<meta charset='utf-8'>
-<title>💬 WebSocket Chat - Netscape Navigator Compatible!</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>">
-</head>
-<body>
-<div class='container'>
-<div class='header'><h1>💬 WebSocket Chat 💬</h1></div>
-<div class='content'>
-<div id='auth-section' class='auth-section'>
-<div id='login-form'>
-<h3>Login</h3>
-<form id='loginForm' method='POST' action='/login'>
-<div class='form-group'>
-<label for='login-username'>Username:</label>
-<input type='text' id='login-username' name='username' required>
-</div>
-<div class='form-group'>
-<label for='login-password'>Password:</label>
-<input type='password' id='login-password' name='password' required>
-</div>
-<button type='submit' class='btn'>Login</button>
-<button type='button' class='btn btn-secondary' id='need-account-btn'>Need an account?</button>
-</form>
-</div>
-<div id='register-form' class='hidden'>
-<h3>Register</h3>
-<form id='registerForm' method='POST' action='/register'>
-<div class='form-group'>
-<label for='reg-username'>Username (3-32 chars, a-z, 0-9, _):</label>
-<input type='text' id='reg-username' name='username' required pattern='[a-z0-9_]{3,32}'>
-</div>
-<div class='form-group'>
-<label for='reg-password'>Password (min 8 chars):</label>
-<input type='password' id='reg-password' name='password' required minlength='8'>
-</div>
-<button type='submit' class='btn btn-success'>Register</button>
-<button type='button' class='btn btn-secondary' id='have-account-btn'>Already have an account?</button>
-</form>
-</div>
-</div>
-<div id='user-info' class='user-info hidden'>
-<span id='username-display'></span>
-<span id='encryption-status' style='margin-left:15px;font-weight:bold;'></span>
-<button class='btn' id='change-key-btn' style='float:right;margin-right:10px;'>🔑 Set Password</button>
-<button class='btn btn-danger' id='logout-btn' style='float:right;'>Logout</button>
-</div>
-<div id='chat-section' class='chat-section hidden'>
-<h3>Chat</h3>
-<div id='chat-log' class='chat-log'></div>
-<div class='chat-input'>
-<input id='msg-input' placeholder='Type your message...' />
-<button id='send-btn'>Send</button>
-</div>
-</div>
-<div id='message'></div>
-</div>
-</div>
-<div class='stats-container'>
-<div class='stat-badge online' id='online-badge'>⚡ ONLINE: <span id='online-count'>0</span></div>
-<div class='stat-badge' id='users-badge'>👥 USERS: <span id='users-count'>0</span></div>
-</div>
-<script src="/static/app.js"></script>
-</body>
-</html>
 
+<head>
+    <meta charset='utf-8'>
+    <title>💬 WebSocket Chat - Netscape Navigator Compatible!</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>">
+</head>
+
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1>💬 WebSocket Chat 💬</h1>
+        </div>
+        <div class='content'>
+            <div id='auth-section' class='auth-section'>
+                <div id='login-form'>
+                    <h3>Login</h3>
+                    <form id='loginForm' method='POST' action='/login'>
+                        <div class='form-group'>
+                            <label for='login-username'>Username:</label>
+                            <input type='text' id='login-username' name='username' required>
+                        </div>
+                        <div class='form-group'>
+                            <label for='login-password'>Password:</label>
+                            <input type='password' id='login-password' name='password' required>
+                        </div>
+                        <button type='submit' class='btn'>Login</button>
+                        <button type='button' class='btn btn-secondary' id='need-account-btn'>Need an account?</button>
+                    </form>
+                </div>
+                <div id='register-form' class='hidden'>
+                    <h3>Register</h3>
+                    <form id='registerForm' method='POST' action='/register'>
+                        <div class='form-group'>
+                            <label for='reg-username'>Username (3-32 chars, a-z, 0-9, _):</label>
+                            <input type='text' id='reg-username' name='username' required pattern='[a-z0-9_]{3,32}'>
+                        </div>
+                        <div class='form-group'>
+                            <label for='reg-password'>Password (min 8 chars):</label>
+                            <input type='password' id='reg-password' name='password' required minlength='8'>
+                        </div>
+                        <button type='submit' class='btn btn-success'>Register</button>
+                        <button type='button' class='btn btn-secondary' id='have-account-btn'>Already have an
+                            account?</button>
+                    </form>
+                </div>
+            </div>
+            <div id='user-info' class='user-info hidden'>
+                <span id='username-display'></span>
+                <span id='encryption-status' style='margin-left:15px;font-weight:bold;'></span>
+                <button class='btn' id='change-key-btn' style='float:right;margin-right:10px;'>🔑 Set Password</button>
+                <button class='btn btn-danger' id='logout-btn' style='float:right;'>Logout</button>
+            </div>
+            <div id='chat-section' class='chat-section hidden'>
+                <h3>Chat</h3>
+                <div id='chat-log' class='chat-log'></div>
+                <div class='chat-input'>
+                    <input id='msg-input' placeholder='Type your message...' />
+                    <button id='send-btn'>Send</button>
+                </div>
+            </div>
+            <div id='message'></div>
+        </div>
+    </div>
+    <div class='stats-container'>
+        <div class='stat-badge online' id='online-badge'>⚡ ONLINE: <span id='online-count'>0</span></div>
+        <div class='stat-badge' id='users-badge'>👥 USERS: <span id='users-count'>0</span></div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
